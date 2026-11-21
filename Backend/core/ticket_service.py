@@ -83,6 +83,7 @@ def _require_analysis_permissions() -> None:
 def _process_ticket(saved: dict) -> dict:
     ticket = {key: saved[key] for key in ("id", "reporter", "title", "description", "reported_priority")}
     stage = "Analyst"
+    flags = policy_engine.inspect_ticket_text(ticket["title"], ticket["description"])
     try:
         raw_analysis = AnalystAgent().analyze(ticket)
         stage = "Validator"
@@ -106,7 +107,6 @@ def _process_ticket(saved: dict) -> dict:
             age_hours=max(0, age.total_seconds() / 3600),
             evidence_status=evidence,
         )
-        flags = policy_engine.inspect_ticket_text(ticket["title"], ticket["description"])
         needs_review = (
             validation.recommended_status == "needs_review"
             or validation.injection_suspected
@@ -134,6 +134,8 @@ def _process_ticket(saved: dict) -> dict:
         workflow, evidence = "needs_review", "unverified"
         reasoning += " Das Ticket wurde gespeichert und muss geprüft werden."
         detail = reasoning
+        if flags["injection_suspected"]:
+            detail += " Manipulationshinweis erkannt."
 
     return database.update_ticket_result(
         ticket["id"], saved["analysis_version"],
