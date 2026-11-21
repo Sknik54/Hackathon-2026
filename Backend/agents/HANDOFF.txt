@@ -1,0 +1,103 @@
+QueueGuard: Uebergabe Person 2 an Person 1
+
+Branch: feature/agents
+Dateien: agents/, tools/, data/monitoring.json, tests/test_agents.py.
+main.py, core/, React, requirements.txt und .env wurden nicht bearbeitet.
+Alle benoetigten Pakete stehen bereits in requirements.txt.
+
+PRUEFSTAND 21.11.2026
+25 lokale Tests bestanden, ein optionaler Netzwerktest standardmaessig aus.
+Echte Gemini/ADK-Calls fuer Analyst UND Validator nachgewiesen:
+  auth offline, 250 Betroffene -> confirmed
+  auth online, individuelles Login-Problem -> unverified / open
+Manipulationsszenario: lokale Tests bestanden; der Live-Nachtest wurde von
+Geminis HTTP-429-Quotenlimit unterbrochen. Kein bestandener Live-Nachweis
+fuer diesen Fall. Fuer die Abgabe bei API-Fehlern needs_review verwenden.
+
+START UND TESTS (PowerShell, im Repository-Hauptordner)
+  .\Backend\.venv\Scripts\python.exe -m unittest discover -s Backend/tests -v
+  .\Backend\.venv\Scripts\python.exe -m Backend.agents.analyst
+
+Optionaler echter Gemini-Live-Test mit 3 Szenarien (API-Aufrufe, ca. 3 Minuten):
+  $env:QUEUEGUARD_LIVE_TESTS='1'
+  .\Backend\.venv\Scripts\python.exe -m unittest Backend.tests.test_agents.LiveAgentTests -v
+  Remove-Item Env:QUEUEGUARD_LIVE_TESTS
+Zwischen den Szenarien liegen 60 Sekunden Pause wegen der Gemini-Quote.
+Optional QUEUEGUARD_LIVE_SCENARIO auf offline, online oder injection setzen,
+um nur einen Fall zu testen (sonst all).
+Normale Tests nutzen ein lokales Testmodell, aber den echten ADK-Runner und
+echte Python-Tools. Der optionale Live-Test benutzt Gemini und temporaere
+Monitoring-Daten; die Demo-Datei im Repo bleibt dabei unveraendert.
+demo_tool_log.txt ist ein gekennzeichneter Auszug echter Live-Tests.
+Eventuelle HTTP-429-Fehler darin zeigen das echte API-Quotenlimit; sie werden
+nicht als bestandene Tests ausgegeben. Ein Nachtest wird separat angehaengt.
+
+KONFIGURATION (nur lokal in Backend/.env, niemals committen)
+  GOOGLE_API_KEY: vorhandener Gemini-Key
+  GEMINI_MODEL: optional; getesteter Standard gemini-3-flash-preview
+  QUEUEGUARD_TICKETS_DB: optional; absoluter Pfad zur SQLite-Datei
+Die Suche erwartet tickets(id, title, description). Ohne DB-Konfiguration
+oder bei nicht verfuegbarer DB ist die Kandidatenliste leer. Kein Demo-Treffer
+wird erfunden. Die Suche oeffnet die DB mit mode=ro und verwendet Parameter.
+
+INTEGRATION (im Backend-Ordner, durch Person 1 in ticket_service.py)
+  from agents.analyst import AnalystAgent
+  from agents.validator import ValidatorAgent
+  from agents.llm_client import AgentError
+
+  try:
+      analysis = AnalystAgent().analyze(ticket)
+      validation = ValidatorAgent().validate(ticket, analysis)
+  except AgentError as exc:
+      # Ticket auf needs_review setzen, Fehlermeldung/Audit speichern.
+      # Niemals evidence_status=confirmed als Fehler-Fallback verwenden.
+      ...
+
+Fuer async FastAPI-Endpunkte stattdessen:
+  analysis = await AnalystAgent().analyze_async(ticket)
+  validation = await ValidatorAgent().validate_async(ticket, analysis)
+
+Beide Ergebnisse sind derzeit Dictionaries mit exakt den Guide-Feldern.
+Person 1 kann sie mit core.models.AnalysisResult(**analysis) bzw.
+core.models.ValidationResult(**validation) in gemeinsame Dataclasses wandeln.
+Validator akzeptiert auch eine AnalysisResult-Dataclass als Eingabe.
+Die Schema-Klassen unter agents.llm_client sind nur interne Wire-Validierung;
+Person 1 behaelt die Hoheit ueber core/models.py.
+
+AnalysisResult:
+  category, service_id, impact, urgency, affected_scope, sla_risk,
+  duplicate_ids, checked_evidence, reasoning, missing_information
+  Zahlen strikt int 0..5; keine bools oder Strings.
+  category: authentication, network, database, hardware, software, security, other
+  service_id: auth, web, db, unknown
+  checked_evidence: Liste echter Monitoring-Tool-Ergebnisse (Dictionaries).
+  duplicate_ids: nur Suchtreffer-IDs, nie die ID des aktuellen Tickets.
+
+ValidationResult:
+  evidence_status, injection_suspected, injection_reasons, conflicting_facts,
+  recommended_status, explanation
+  evidence_status: confirmed, unverified, conflicting
+  recommended_status: open, needs_review, reject (LLM-reject wird konservativ
+  zu needs_review; verbindliche Entscheidungen trifft Person 3s PolicyEngine).
+
+DEMO-MONITORING
+get_service_status liest Backend/data/monitoring.json bei jedem Aufruf neu.
+Person 1 kann im separaten Demo-Endpunkt status und affected_users aendern.
+Erlaubte Status: online, offline, degraded; IDs: auth, web, db.
+Diese Aenderungsfunktion ist KEIN Agent-Tool. ADK kennt nur die zwei
+Lesefunktionen get_service_status und search_similar_tickets.
+
+WICHTIG FUER DIE DEMO
+Monitoring ist immer als SIMULATED_MONITORING markiert. online bedeutet
+nicht, dass ein Nutzer luegt. Fehlender Key, API-Quote (429), Ueberlastung
+(503), Timeout, fehlender Tool-Aufruf oder kaputtes JSON ergeben AgentError.
+Kein stiller Mock-Fallback. Validator prueft den Dienst selbst erneut und
+laesst confirmed nur mit frischen offline/degraded-Belegen zu.
+PriorityEngine/PolicyEngine und alle Datenbank-Aenderungen bleiben bei
+Person 1/3. Agenten erhalten weder SQL-, Shell- noch Loesch-Werkzeuge.
+
+GIT-ZUSAMMENARBEIT
+Person 2 pusht nur feature/agents; Person 1 reviewed und merged den PR.
+  git push -u origin feature/agents
+Danach auf GitHub einen Pull Request von feature/agents nach main anlegen.
+Nicht git add . verwenden: vorhandene Frontend-Dateien gehoeren Person 3.
