@@ -1,8 +1,9 @@
-"""Offline tests: python -m unittest discover -s Backend/tests -v."""
+"""Offline agent tests: python -m unittest Backend.tests.test_agents -v."""
 
 import json
 import asyncio
-from contextlib import closing
+from contextlib import closing, contextmanager
+from dataclasses import asdict, fields
 import logging
 import os
 import sqlite3
@@ -12,14 +13,20 @@ import time
 import unittest
 from unittest.mock import patch
 
-from Backend.tools import monitoring
+from Backend.tools import monitoring, search_tickets
 from Backend.tools.search_tickets import search_similar_tickets
+from Backend.core import database
+from Backend.core.models import (
+    AnalysisResult as SharedAnalysisResult, TicketCreate,
+    ValidationResult as SharedValidationResult,
+)
 from Backend.agents.analyst import AnalystAgent
 from Backend.agents.validator import ValidatorAgent
 from Backend.agents.llm_client import AgentError
 from google.adk.models.base_llm import BaseLlm
 from google.adk.models.llm_response import LlmResponse
 from google.genai import types
+from google.genai.errors import ClientError
 from pydantic import Field
 
 
@@ -64,6 +71,16 @@ def valid_validation():
     }
 
 
+@contextmanager
+def working_directory(path):
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
+
 class ScriptedModel(BaseLlm):
     """Offline LLM substitute; the REAL ADK runner executes the Python tool."""
 
@@ -73,15 +90,21 @@ class ScriptedModel(BaseLlm):
     service_id: str = "auth"
     output: dict = Field(default_factory=valid_analysis)
     seen_tool_results: list[dict] = Field(default_factory=list)
+    seen_tool_names: list[str] = Field(default_factory=list)
 
     async def generate_content_async(self, llm_request, stream=False):
         self.calls += 1
+        self.seen_tool_names = sorted(set(self.seen_tool_names) | set(llm_request.tools_dict))
         for content in llm_request.contents:
             for part in content.parts or []:
                 if part.function_response:
                     self.seen_tool_results.append(part.function_response.response)
         if self.mode == "error":
             raise RuntimeError("sensitive SDK detail must not be exposed")
+        if self.mode == "quota":
+            raise ClientError(429, {"error": {
+                "code": 429, "status": "RESOURCE_EXHAUSTED", "message": "offline quota test",
+            }})
         if self.mode == "timeout":
             await asyncio.sleep(10)
         if self.calls == 1 and self.mode != "no_tool":
@@ -172,7 +195,9 @@ class AnalystTests(unittest.TestCase):
         self.assertEqual(model.seen_tool_results[0]["affected_users"], 250)
         self.assertEqual(result["checked_evidence"][0]["status"], "offline")
         self.assertEqual(result["duplicate_ids"], [])
-        self.assertEqual(set(result), set(valid_analysis()))
+        self.assertEqual(set(result), {field.name for field in fields(SharedAnalysisResult)})
+        self.assertEqual(asdict(SharedAnalysisResult(**result)), result)
+        self.assertEqual(model.seen_tool_names, ["get_service_status", "search_similar_tickets"])
 
     def test_missing_tool_call_fails_closed(self):
         with self.assertRaisesRegex(AgentError, "Kein echter Monitoring"):
@@ -188,6 +213,20 @@ class AnalystTests(unittest.TestCase):
                 timeout = .05 if mode == "timeout" else 10
                 AnalystAgent(model=ScriptedModel(mode=mode), timeout=timeout).analyze(self.ticket)
             self.assertNotIn("sensitive SDK detail", str(caught.exception))
+
+    def test_quota_failure_is_agent_error_without_retry_or_mock_result(self):
+        model = ScriptedModel(mode="quota")
+        with self.assertRaisesRegex(AgentError, "HTTP 429.*needs_review"):
+            AnalystAgent(model=model).analyze(self.ticket)
+        self.assertEqual(model.calls, 1)
+
+    def test_missing_key_fails_before_client_creation(self):
+        with patch.dict(os.environ, {
+            "GOOGLE_API_KEY": "", "GEMINI_API_KEY": "", "GEMINI_KEY": "",
+        }), patch("dotenv.load_dotenv", return_value=False), patch("google.genai.Client") as client:
+            with self.assertRaisesRegex(AgentError, "GOOGLE_API_KEY fehlt"):
+                AnalystAgent().analyze(self.ticket)
+            client.assert_not_called()
 
     def test_ratings_reject_out_of_range_strings_and_booleans(self):
         for impact in (-1, 6, "5", True):
@@ -224,9 +263,10 @@ class TicketSearchTests(unittest.TestCase):
                 (1, "Login kaputt", "Anmeldung nicht moeglich"),
                 (2, "Drucker", "Toner fehlt"),
             ])
-        patcher = patch.dict(os.environ, {"QUEUEGUARD_TICKETS_DB": str(self.path)})
+        patcher = patch.dict(os.environ, {"QUEUEGUARD_DB_PATH": str(self.path)})
         patcher.start()
         self.addCleanup(patcher.stop)
+        os.environ.pop("QUEUEGUARD_TICKETS_DB", None)
 
     def test_search_is_read_only(self):
         before = self.path.read_bytes()
@@ -244,9 +284,64 @@ class TicketSearchTests(unittest.TestCase):
 
     def test_missing_database_is_not_created(self):
         missing = self.path.parent / "missing.db"
-        with patch.dict(os.environ, {"QUEUEGUARD_TICKETS_DB": str(missing)}):
+        with patch.dict(os.environ, {"QUEUEGUARD_DB_PATH": str(missing)}):
             self.assertEqual(search_similar_tickets("Login"), [])
         self.assertFalse(missing.exists())
+
+    def test_primary_database_path_wins_over_legacy_setting(self):
+        legacy = self.path.parent / "legacy.db"
+        with patch.dict(os.environ, {"QUEUEGUARD_TICKETS_DB": str(legacy)}):
+            self.assertEqual([row["id"] for row in search_similar_tickets("Login")], [1])
+        self.assertFalse(legacy.exists())
+
+    def test_invalid_primary_does_not_fall_back_to_another_database(self):
+        missing = self.path.parent / "missing.db"
+        for primary in (str(missing), ""):
+            with self.subTest(primary=primary), patch.dict(os.environ, {
+                "QUEUEGUARD_DB_PATH": primary, "QUEUEGUARD_TICKETS_DB": str(self.path),
+            }):
+                self.assertEqual(search_similar_tickets("Login"), [])
+        self.assertFalse(missing.exists())
+
+    def test_legacy_database_path_still_works_without_primary_setting(self):
+        os.environ.pop("QUEUEGUARD_DB_PATH")
+        with patch.dict(os.environ, {"QUEUEGUARD_TICKETS_DB": str(self.path)}):
+            self.assertEqual([row["id"] for row in search_similar_tickets("Login")], [1])
+
+    def test_default_database_is_searched_without_environment_settings(self):
+        os.environ.pop("QUEUEGUARD_DB_PATH")
+        with patch.object(search_tickets, "DEFAULT_DB_PATH", self.path):
+            self.assertEqual([row["id"] for row in search_similar_tickets("Login")], [1])
+
+    def test_missing_default_database_and_parent_are_not_created(self):
+        os.environ.pop("QUEUEGUARD_DB_PATH")
+        missing = self.path.parent / "absent" / "queueguard.db"
+        with patch.object(search_tickets, "DEFAULT_DB_PATH", missing):
+            self.assertEqual(search_similar_tickets("Login"), [])
+        self.assertFalse(missing.parent.exists())
+
+    def test_backend_database_and_relative_paths_work_from_both_start_directories(self):
+        backend_path = self.path.parent / "backend.db"
+        with patch.object(database, "DB_PATH", backend_path):
+            database.init_db()
+            saved = database.insert_ticket(
+                TicketCreate(reporter="Anna", title="Login kaputt",
+                             description="Anmeldung scheitert", reported_priority="high"),
+                priority_score=0, priority_label="Low", workflow_status="needs_review",
+                evidence_status="unverified", reasoning="Analyse ausstehend",
+            )
+        before = backend_path.read_bytes()
+        backend_directory = self.path.parent / "Backend"
+        backend_directory.mkdir()
+        for directory in (self.path.parent, backend_directory):
+            relative = os.path.relpath(backend_path, directory)
+            with self.subTest(directory=directory.name), working_directory(directory), \
+                    patch.dict(os.environ, {"QUEUEGUARD_DB_PATH": relative}), \
+                    patch.object(database, "DB_PATH", Path(relative)):
+                self.assertEqual(database.list_tickets()[0]["id"], saved["id"])
+                self.assertEqual([row["id"] for row in search_similar_tickets("Login")],
+                                 [saved["id"]])
+        self.assertEqual(backend_path.read_bytes(), before)
 
     def test_adk_search_only_accepts_returned_ids_and_excludes_current_ticket(self):
         output = valid_analysis()
@@ -259,8 +354,8 @@ class TicketSearchTests(unittest.TestCase):
             self.assertEqual(model.calls, 3)
             self.assertEqual(result["duplicate_ids"], expected)
 
-    def test_unconfigured_and_bad_arguments(self):
-        with patch.dict(os.environ, {"QUEUEGUARD_TICKETS_DB": ""}):
+    def test_unavailable_database_and_bad_arguments(self):
+        with patch.dict(os.environ, {"QUEUEGUARD_DB_PATH": ""}):
             self.assertEqual(search_similar_tickets("Login"), [])
         for limit in (0, -1, True, "5"):
             self.assertEqual(search_similar_tickets("Login", limit), [])
@@ -289,7 +384,22 @@ class ValidatorTests(unittest.TestCase):
         return ValidatorAgent(model=model).validate(self.ticket, self.analysis)
 
     def test_offline_outage_can_be_confirmed(self):
-        self.assertEqual(self.validate()["evidence_status"], "confirmed")
+        model = ScriptedModel(output=valid_validation())
+        result = ValidatorAgent(model=model).validate(self.ticket, self.analysis)
+        self.assertEqual(result["evidence_status"], "confirmed")
+        self.assertEqual(model.seen_tool_names, ["get_service_status"])
+        self.assertEqual(asdict(SharedValidationResult(**result)), result)
+
+    def test_validator_accepts_shared_analysis_dataclass(self):
+        result = ValidatorAgent(model=ScriptedModel(output=valid_validation())).validate(
+            self.ticket, SharedAnalysisResult(**self.analysis)
+        )
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["evidence_status"], "confirmed")
+
+    def test_validator_quota_failure_is_not_a_confirmed_fallback(self):
+        with self.assertRaisesRegex(AgentError, "HTTP 429.*needs_review"):
+            self.validate(mode="quota")
 
     def test_online_cannot_confirm_outage_even_if_llm_claims_it(self):
         self.write_status("online", 0)
