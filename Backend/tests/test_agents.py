@@ -223,10 +223,23 @@ class AnalystTests(unittest.TestCase):
     def test_missing_key_fails_before_client_creation(self):
         with patch.dict(os.environ, {
             "GOOGLE_API_KEY": "", "GEMINI_API_KEY": "", "GEMINI_KEY": "",
+            "QUEUEGUARD_DEMO_MODE": "false",
         }), patch("dotenv.load_dotenv", return_value=False), patch("google.genai.Client") as client:
             with self.assertRaisesRegex(AgentError, "GOOGLE_API_KEY fehlt"):
                 AnalystAgent().analyze(self.ticket)
             client.assert_not_called()
+
+    def test_explicit_offline_demo_reads_monitoring_without_creating_gemini_client(self):
+        with patch.dict(os.environ, {"QUEUEGUARD_DEMO_MODE": "true", "GOOGLE_API_KEY": ""}), \
+                patch("dotenv.load_dotenv", return_value=False), patch("google.genai.Client") as client:
+            analysis = AnalystAgent().analyze(self.ticket)
+            validation = ValidatorAgent().validate(self.ticket, analysis)
+            client.assert_not_called()
+        self.assertTrue(analysis["reasoning"].startswith("OFFLINE-DEMO:"))
+        self.assertTrue(validation["explanation"].startswith("OFFLINE-DEMO:"))
+        self.assertEqual(analysis["checked_evidence"][0]["affected_users"], 250)
+        self.assertEqual(validation["evidence_status"], "confirmed")
+        self.assertEqual((analysis["impact"], analysis["urgency"], analysis["affected_scope"]), (5, 5, 5))
 
     def test_ratings_reject_out_of_range_strings_and_booleans(self):
         for impact in (-1, 6, "5", True):
@@ -413,6 +426,14 @@ class ValidatorTests(unittest.TestCase):
         self.assertEqual(result["evidence_status"], "unverified")
         self.assertEqual(result["recommended_status"], "needs_review")
 
+    def test_offline_demo_does_not_confirm_online_monitoring(self):
+        self.write_status("online", 0)
+        with patch.dict(os.environ, {"QUEUEGUARD_DEMO_MODE": "true"}), \
+                patch("dotenv.load_dotenv", return_value=False):
+            result = ValidatorAgent().validate(self.ticket, self.analysis)
+        self.assertEqual(result["evidence_status"], "unverified")
+        self.assertNotEqual(result["recommended_status"], "reject")
+
     def test_fresh_monitoring_detects_changed_evidence(self):
         self.analysis["checked_evidence"] = [{"service_id": "auth", "status": "online"}]
         result = self.validate()
@@ -449,8 +470,9 @@ class ValidatorTests(unittest.TestCase):
                 self.validate(output)
 
 
-@unittest.skipUnless(os.getenv("QUEUEGUARD_LIVE_TESTS") == "1",
-                     "Set QUEUEGUARD_LIVE_TESTS=1 to make real Gemini API calls")
+@unittest.skipUnless(os.getenv("QUEUEGUARD_LIVE_TESTS") == "1"
+                     and os.getenv("QUEUEGUARD_DEMO_MODE", "").lower() not in {"1", "true", "yes"},
+                     "Live tests need QUEUEGUARD_LIVE_TESTS=1 and offline demo disabled")
 class LiveAgentTests(unittest.TestCase):
     """Opt-in paid/network smoke test. Demo JSON in the repo stays unchanged."""
 

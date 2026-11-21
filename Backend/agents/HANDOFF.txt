@@ -37,6 +37,12 @@ Eventuelle HTTP-429-Fehler darin zeigen das echte API-Quotenlimit; sie werden
 nicht als bestandene Tests ausgegeben. Ein Nachtest wird separat angehaengt.
 
 KONFIGURATION (nur lokal in Backend/.env, niemals committen)
+  QUEUEGUARD_DEMO_MODE=true: ausdruecklicher Offline-Demomodus ohne Gemini.
+  Agentenantworten sind simuliert und mit OFFLINE-DEMO gekennzeichnet.
+  ADK-Tools lesen weiterhin das echte simulierte Monitoring; Backend,
+  SQLite, Audit und PriorityEngine bleiben im regulaeren Ablauf aktiv.
+  Fuer echte Gemini-Aufrufe: QUEUEGUARD_DEMO_MODE=false setzen und Backend
+  neu starten. Offline-Demo-Ergebnisse sind kein Live-Gemini-Nachweis.
   GOOGLE_API_KEY: vorhandener Gemini-Key
   GEMINI_MODEL: optional; getesteter Standard gemini-3-flash-preview
   QUEUEGUARD_DB_PATH: gemeinsame SQLite-Datei fuer Backend und Ticketsuche
