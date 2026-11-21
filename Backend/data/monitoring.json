@@ -1,0 +1,7 @@
+{
+  "services": {
+    "auth": {"status": "online", "affected_users": 0},
+    "web": {"status": "online", "affected_users": 0},
+    "db": {"status": "online", "affected_users": 0}
+  }
+}

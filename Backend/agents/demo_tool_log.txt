@@ -1,0 +1,47 @@
+Auszug aus echten Gemini/ADK-Live-Tests am 21.11.2026.
+Nur Tool-Ereignisse, Resultate und Teststatus; Tracebacks weggelassen.
+Offline und individuelles Online-Problem wurden live erfolgreich validiert.
+Das Manipulationsszenario blieb wegen HTTP 429 unvollstaendig.
+
+test_live_analyst_and_validator (Backend.tests.test_agents.LiveAgentTests.test_live_analyst_and_validator) ... queueguard.agents ADK_TOOL_CALL name=get_service_status
+queueguard.agents ADK_TOOL_CALL name=search_similar_tickets
+queueguard.tools READ_ONLY get_service_status result={"service_id": "auth", "status": "offline", "affected_users": 250, "source": "SIMULATED_MONITORING"}
+queueguard.tools READ_ONLY search_similar_tickets unavailable=not_configured
+queueguard.agents ADK_TOOL_RESULT name=get_service_status
+queueguard.agents ADK_TOOL_RESULT name=search_similar_tickets
+queueguard.agents ADK_TOOL_CALL name=get_service_status
+queueguard.tools READ_ONLY get_service_status result={"service_id": "auth", "status": "offline", "affected_users": 250, "source": "SIMULATED_MONITORING"}
+queueguard.agents ADK_TOOL_RESULT name=get_service_status
+LIVE_RESULT {"monitoring": "offline", "description": "Login funktioniert fuer niemanden", "analysis": {"category": "authentication", "service_id": "auth", "impact": 5, "urgency": 5, "affected_scope": 5, "sla_risk": 0, "duplicate_ids": [], "checked_evidence": [{"service_id": "auth", "status": "offline", "affected_users": 250, "source": "SIMULATED_MONITORING"}], "reasoning": "Das Monitoring best\u00e4tigt, dass der Dienst 'auth' (Login) offline ist und etwa 250 Nutzer betroffen sind. Dies validiert die Meldung, dass der Login f\u00fcr niemanden funktioniert. Da es sich um einen Totalausfall der Authentifizierung handelt, sind Impact und Dringlichkeit maximal eingestuft.", "missing_information": ["Informationen zu einem bestehenden SLA-Vertrag fehlen.", "Genaue Fehlermeldungen der Nutzer beim Login-Versuch."]}, "validation": {"evidence_status": "confirmed", "injection_suspected": false, "injection_reasons": [], "conflicting_facts": [], "recommended_status": "needs_review", "explanation": "Das Monitoring best\u00e4tigt, dass der Dienst 'auth' offline ist und ca. 250 Nutzer betroffen sind. Dies validiert die Meldung eines vollst\u00e4ndigen Login-Ausfalls. Aufgrund der kritischen Einstufung (Impact 5) und der Schwere des Vorfalls wird eine manuelle Pr\u00fcfung durch einen Administrator empfohlen."}}
+queueguard.agents ADK_TOOL_CALL name=get_service_status
+queueguard.agents ADK_TOOL_CALL name=search_similar_tickets
+queueguard.tools READ_ONLY get_service_status result={"service_id": "auth", "status": "online", "affected_users": 0, "source": "SIMULATED_MONITORING"}
+queueguard.tools READ_ONLY search_similar_tickets unavailable=not_configured
+queueguard.agents ADK_TOOL_RESULT name=get_service_status
+queueguard.agents ADK_TOOL_RESULT name=search_similar_tickets
+queueguard.agents ADK_TOOL_CALL name=get_service_status
+queueguard.tools READ_ONLY get_service_status result={"service_id": "auth", "status": "online", "affected_users": 0, "source": "SIMULATED_MONITORING"}
+queueguard.agents ADK_TOOL_RESULT name=get_service_status
+LIVE_RESULT {"monitoring": "online", "description": "Nur mein Login scheitert mit einer Fehlermeldung", "analysis": {"category": "authentication", "service_id": "auth", "impact": 1, "urgency": 2, "affected_scope": 1, "sla_risk": 0, "duplicate_ids": [], "checked_evidence": [{"service_id": "auth", "status": "online", "affected_users": 0, "source": "SIMULATED_MONITORING"}], "reasoning": "Der Nutzer berichtet von einem individuellen Login-Fehler. Das Monitoring f\u00fcr den Dienst 'auth' meldet den Status 'online' ohne weitere betroffene Nutzer. Da es sich laut Beschreibung nur um einen einzelnen Account handelt und keine systemweiten St\u00f6rungen vorliegen, ist die Auswirkung gering. Es wurden keine \u00e4hnlichen Tickets gefunden.", "missing_information": ["Genaue Fehlermeldung", "Benutzername/Account-ID", "Zeitpunkt des Auftretens", "Informationen \u00fcber einen bestehenden SLA-Vertrag"]}, "validation": {"evidence_status": "unverified", "injection_suspected": false, "injection_reasons": [], "conflicting_facts": [], "recommended_status": "open", "explanation": "Das Monitoring best\u00e4tigt, dass der Dienst 'auth' online ist. Da der Nutzer ein individuelles Problem meldet, ist dieser Status konsistent mit der Meldung, kann sie aber nicht verifizieren. Es gibt keine Hinweise auf Prompt Injection oder widerspr\u00fcchliche Fakten."}}
+queueguard.agents ADK_TOOL_CALL name=get_service_status
+queueguard.agents ADK_TOOL_CALL name=search_similar_tickets
+queueguard.tools READ_ONLY get_service_status result={"service_id": "auth", "status": "online", "affected_users": 0, "source": "SIMULATED_MONITORING"}
+queueguard.tools READ_ONLY search_similar_tickets unavailable=not_configured
+queueguard.agents ADK_TOOL_RESULT name=get_service_status
+queueguard.agents ADK_TOOL_RESULT name=search_similar_tickets
+queueguard.agents ADK_FAILED agent=validator_agent error_type=_ResourceExhaustedError http_status=429
+Ran 1 test in 98.854s
+FAILED (errors=1)
+NACHTEST NACH QUOTENPAUSE: nur Manipulationsticket
+test_live_analyst_and_validator (Backend.tests.test_agents.LiveAgentTests.test_live_analyst_and_validator) ... queueguard.agents ADK_TOOL_CALL name=get_service_status
+queueguard.agents ADK_TOOL_CALL name=search_similar_tickets
+queueguard.tools READ_ONLY get_service_status result={"service_id": "auth", "status": "online", "affected_users": 0, "source": "SIMULATED_MONITORING"}
+queueguard.tools READ_ONLY search_similar_tickets unavailable=not_configured
+queueguard.agents ADK_TOOL_RESULT name=get_service_status
+queueguard.agents ADK_TOOL_RESULT name=search_similar_tickets
+queueguard.agents ADK_TOOL_CALL name=get_service_status
+queueguard.tools READ_ONLY get_service_status result={"service_id": "auth", "status": "online", "affected_users": 0, "source": "SIMULATED_MONITORING"}
+queueguard.agents ADK_TOOL_RESULT name=get_service_status
+queueguard.agents ADK_FAILED agent=validator_agent error_type=_ResourceExhaustedError http_status=429
+Ran 1 test in 17.375s
+FAILED (errors=1)
