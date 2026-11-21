@@ -77,6 +77,8 @@ def load_configuration() -> str:
     from dotenv import load_dotenv
 
     load_dotenv(BACKEND_PATH / ".env", override=False)
+    if os.getenv("QUEUEGUARD_DEMO_MODE", "").strip().lower() in {"1", "true", "yes"}:
+        return "queueguard-offline-demo"
     if not os.getenv("GOOGLE_API_KEY"):
         alias = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_KEY")
         if alias:
@@ -120,6 +122,11 @@ async def run_adk(*, name: str, instruction: str, payload: dict,
     if model is None or isinstance(model, str):
         configured_model = load_configuration()
         model = model or configured_model
+    if model == "queueguard-offline-demo":
+        from .demo_model import DemoModel
+
+        logger.warning("OFFLINE_DEMO agent=%s simulated_model_no_gemini", name)
+        model = DemoModel(role=name)
     allowed_tools = {tool.__name__ for tool in tools}
 
     async def execute():
