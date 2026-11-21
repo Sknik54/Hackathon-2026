@@ -6,8 +6,12 @@ main.py, core/, React, requirements.txt und .env wurden nicht bearbeitet.
 Alle benoetigten Pakete stehen bereits in requirements.txt.
 
 PRUEFSTAND 21.11.2026
-25 lokale Tests bestanden, ein optionaler Netzwerktest standardmaessig aus.
-Echte Gemini/ADK-Calls fuer Analyst UND Validator nachgewiesen:
+35 lokale Tests bestanden, ein optionaler Netzwerktest standardmaessig aus.
+Integrationsnachtest ohne Netzwerk: echtes SQLite-Schema von core.database,
+relative Pfade aus Projekt-/Backend-Ordner, nur lesende ADK-Tools,
+gemeinsame Dataclasses und simulierte HTTP-429-Fehler geprueft.
+Beim Integrationsnachtest keine neuen Gemini-Aufrufe ausgefuehrt.
+Aus frueheren Live-Tests sind Gemini/ADK-Calls fuer beide Agenten nachgewiesen:
   auth offline, 250 Betroffene -> confirmed
   auth online, individuelles Login-Problem -> unverified / open
 Manipulationsszenario: lokale Tests bestanden; der Live-Nachtest wurde von
@@ -15,7 +19,7 @@ Geminis HTTP-429-Quotenlimit unterbrochen. Kein bestandener Live-Nachweis
 fuer diesen Fall. Fuer die Abgabe bei API-Fehlern needs_review verwenden.
 
 START UND TESTS (PowerShell, im Repository-Hauptordner)
-  .\Backend\.venv\Scripts\python.exe -m unittest discover -s Backend/tests -v
+  .\Backend\.venv\Scripts\python.exe -m unittest Backend.tests.test_agents -v
   .\Backend\.venv\Scripts\python.exe -m Backend.agents.analyst
 
 Optionaler echter Gemini-Live-Test mit 3 Szenarien (API-Aufrufe, ca. 3 Minuten):
@@ -35,10 +39,20 @@ nicht als bestandene Tests ausgegeben. Ein Nachtest wird separat angehaengt.
 KONFIGURATION (nur lokal in Backend/.env, niemals committen)
   GOOGLE_API_KEY: vorhandener Gemini-Key
   GEMINI_MODEL: optional; getesteter Standard gemini-3-flash-preview
-  QUEUEGUARD_TICKETS_DB: optional; absoluter Pfad zur SQLite-Datei
-Die Suche erwartet tickets(id, title, description). Ohne DB-Konfiguration
-oder bei nicht verfuegbarer DB ist die Kandidatenliste leer. Kein Demo-Treffer
-wird erfunden. Die Suche oeffnet die DB mit mode=ro und verwendet Parameter.
+  QUEUEGUARD_DB_PATH: gemeinsame SQLite-Datei fuer Backend und Ticketsuche
+  QUEUEGUARD_TICKETS_DB: nur kompatibler Fallback, falls QUEUEGUARD_DB_PATH fehlt
+  Ohne beide Variablen: Backend/queueguard.db (bezogen auf den Code-Ordner).
+QUEUEGUARD_DB_PATH hat Vorrang, auch wenn die Datei fehlt oder der Wert
+ungueltig ist; dann wird keine andere Datenbank als Ersatz durchsucht.
+Relative konfigurierte Pfade beziehen sich wie bei core.database auf das
+Arbeitsverzeichnis des Prozesses. Ein absoluter Pfad vermeidet Unterschiede
+zwischen Start aus dem Projekt- und Backend-Ordner.
+WICHTIG fuer Person 1: .env bzw. QUEUEGUARD_DB_PATH vor dem Import von
+core.database laden; DB_PATH wird dort bereits beim Import festgelegt.
+Die Suche erwartet tickets(id, title, description). Bei fehlender oder nicht
+verfuegbarer DB ist die Kandidatenliste leer. Es werden weder DB-Dateien noch
+Verzeichnisse angelegt oder Demo-Treffer erfunden. Die Suche oeffnet die DB
+mit mode=ro, setzt query_only und verwendet gebundene SQL-Parameter.
 
 INTEGRATION (im Backend-Ordner, durch Person 1 in ticket_service.py)
   from agents.analyst import AnalystAgent
@@ -46,6 +60,9 @@ INTEGRATION (im Backend-Ordner, durch Person 1 in ticket_service.py)
   from agents.llm_client import AgentError
 
   try:
+      # ticket ist ein dict mit gespeicherter id, title, description und
+      # reported_priority. Die id verhindert, dass das Ticket sich selbst
+      # als Dublette meldet. reporter wird nicht an Gemini weitergegeben.
       analysis = AnalystAgent().analyze(ticket)
       validation = ValidatorAgent().validate(ticket, analysis)
   except AgentError as exc:
@@ -61,6 +78,8 @@ Beide Ergebnisse sind derzeit Dictionaries mit exakt den Guide-Feldern.
 Person 1 kann sie mit core.models.AnalysisResult(**analysis) bzw.
 core.models.ValidationResult(**validation) in gemeinsame Dataclasses wandeln.
 Validator akzeptiert auch eine AnalysisResult-Dataclass als Eingabe.
+Beide Umwandlungen und die Validator-Eingabe als gemeinsame Dataclass
+sind gegen die vorhandenen Klassen in core/models.py lokal getestet.
 Die Schema-Klassen unter agents.llm_client sind nur interne Wire-Validierung;
 Person 1 behaelt die Hoheit ueber core/models.py.
 
@@ -72,6 +91,8 @@ AnalysisResult:
   service_id: auth, web, db, unknown
   checked_evidence: Liste echter Monitoring-Tool-Ergebnisse (Dictionaries).
   duplicate_ids: nur Suchtreffer-IDs, nie die ID des aktuellen Tickets.
+Person 3s Policy muss authentication/database sowie checked_evidence als
+Liste strukturierter Dictionaries zulassen; die Feldnamen bleiben gleich.
 
 ValidationResult:
   evidence_status, injection_suspected, injection_reasons, conflicting_facts,
