@@ -11,8 +11,7 @@ from .models import TicketCreate
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 load_dotenv(BACKEND_DIR / ".env", override=False)
 DB_PATH = Path(
-    os.getenv("QUEUEGUARD_DB_PATH") or os.getenv("QUEUEGUARD_TICKETS_DB")
-    or BACKEND_DIR / "queueguard.db"
+    os.getenv("QUEUEGUARD_DB_PATH", os.getenv("QUEUEGUARD_TICKETS_DB", str(BACKEND_DIR / "queueguard.db")))
 ).expanduser().resolve()
 _TICKET_FIELDS = "id, title, priority_score, priority_label, workflow_status, evidence_status, reasoning"
 _ANALYSIS_INPUT = "id, reporter, title, description, reported_priority, created_at, analysis_version"
@@ -53,7 +52,9 @@ def init_db() -> None:
             )
             """
         )
-    os.environ["QUEUEGUARD_TICKETS_DB"] = str(DB_PATH.resolve())
+    active_path = str(DB_PATH.resolve())
+    os.environ["QUEUEGUARD_DB_PATH"] = active_path
+    os.environ["QUEUEGUARD_TICKETS_DB"] = active_path
 
 
 def insert_ticket(

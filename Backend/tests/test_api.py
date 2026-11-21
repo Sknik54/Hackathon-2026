@@ -71,6 +71,7 @@ class TicketApiTests(unittest.TestCase):
                     "SELECT description, workflow_status FROM tickets WHERE id = ?", (ticket["id"],)
                 ).fetchone()
             self.assertEqual(stored, (payload["description"], "needs_review"))
+            self.assertEqual(os.environ["QUEUEGUARD_DB_PATH"], str(self.db_path))
             self.assertEqual(os.environ["QUEUEGUARD_TICKETS_DB"], str(self.db_path))
             self.assertEqual(ticket, payload | {"id": 1})
             return self.analyze_by_title(ticket)
