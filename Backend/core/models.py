@@ -1,17 +1,21 @@
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field
 
 
-NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+ServiceId = Literal["auth", "web", "db"]
+ServiceStatus = Literal["online", "offline", "degraded"]
+AffectedUsers = Annotated[int, Field(strict=True, ge=0)]
 
 
 class TicketCreate(BaseModel):
-    reporter: NonEmptyText
-    title: NonEmptyText
-    description: NonEmptyText
-    reported_priority: NonEmptyText
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    reporter: str
+    title: str
+    description: str
+    reported_priority: str
 
 
 class TicketResponse(BaseModel):
@@ -22,6 +26,27 @@ class TicketResponse(BaseModel):
     workflow_status: str
     evidence_status: str
     reasoning: str
+
+
+class MonitoringChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: ServiceStatus
+    affected_users: AffectedUsers
+
+
+class MonitoringEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    service_id: Literal["auth", "web", "db", "unknown"]
+    status: Literal["online", "offline", "degraded", "unknown"]
+    affected_users: AffectedUsers
+    source: Literal["SIMULATED_MONITORING"]
+    error: Literal["unknown_service", "monitoring_unavailable"] | None = None
+
+
+class MonitoringSnapshot(BaseModel):
+    services: list[MonitoringEvidence]
 
 
 @dataclass
